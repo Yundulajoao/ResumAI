@@ -9,16 +9,29 @@ export enum Subject {
   MATHEMATICS = 'Matemática',
   PHYSICS = 'Física',
   BIOLOGY = 'Biologia',
+  CHEMISTRY = 'Química',
   HISTORY = 'História',
   GEOGRAPHY = 'Geografia',
   LITERATURE = 'Literatura',
+  PHILOSOPHY = 'Filosofia',
+  SOCIOLOGY = 'Sociologia',
+  THEOLOGY = 'Teologia',
+  LAW = 'Direito',
+  ECONOMICS = 'Economia',
   OTHERS = 'Outros'
+}
+
+export enum UserRole {
+  PROFESSOR = 'Professor',
+  ALUNO = 'Aluno',
+  CURIOSO = 'Curioso'
 }
 
 export interface User {
   id: string;
   name: string;
   email: string;
+  role: UserRole;
 }
 
 export interface Flashcard {

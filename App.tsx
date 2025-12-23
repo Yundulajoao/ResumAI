@@ -1,4 +1,31 @@
 
+/**
+ * RE-INITIALIZE DATABASE SQL:
+ * 
+ * DROP TABLE IF EXISTS summaries CASCADE;
+ * DROP TABLE IF EXISTS profiles CASCADE;
+ * 
+ * CREATE TABLE profiles (
+ *   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+ *   full_name TEXT,
+ *   role TEXT DEFAULT 'Aluno' CHECK (role IN ('Professor', 'Aluno', 'Curioso')),
+ *   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+ * );
+ * 
+ * CREATE TABLE summaries (
+ *   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+ *   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+ *   title TEXT NOT NULL,
+ *   content TEXT NOT NULL,
+ *   subject TEXT NOT NULL,
+ *   importance TEXT NOT NULL,
+ *   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+ *   flashcards JSONB
+ * );
+ * 
+ * -- Enable RLS & Policies for both tables...
+ */
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Search, 
@@ -11,7 +38,7 @@ import {
   Check, 
   Link as LinkIcon,
   Sparkles,
-  FileDown,
+  FileDown, 
   LayoutDashboard,
   GraduationCap,
   Calendar,
@@ -38,10 +65,16 @@ import {
   Database,
   Terminal,
   UserPlus,
-  CheckCircle2
+  CheckCircle2,
+  Cpu,
+  Beaker,
+  Users,
+  Scale,
+  Briefcase,
+  UserCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Summary, Subject, Importance, Flashcard, SummaryOption, User } from './types';
+import { Summary, Subject, Importance, Flashcard, SummaryOption, User, UserRole } from './types';
 import { GeminiService } from './services/geminiService';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
 import { jsPDF } from 'jspdf';
@@ -58,9 +91,15 @@ const SubjectIcons: Record<string, React.ElementType> = {
   [Subject.MATHEMATICS]: Calculator,
   [Subject.PHYSICS]: Atom,
   [Subject.BIOLOGY]: Microscope,
+  [Subject.CHEMISTRY]: Beaker,
   [Subject.HISTORY]: ScrollText,
   [Subject.GEOGRAPHY]: Globe,
   [Subject.LITERATURE]: Book,
+  [Subject.PHILOSOPHY]: BrainCircuit,
+  [Subject.SOCIOLOGY]: Users,
+  [Subject.THEOLOGY]: GraduationCap,
+  [Subject.LAW]: Scale,
+  [Subject.ECONOMICS]: Database,
   [Subject.OTHERS]: FileText
 };
 
@@ -165,7 +204,7 @@ const App: React.FC = () => {
   const [loadingMessageIdx, setLoadingMessageIdx] = useState(0);
 
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
-  const [authForm, setAuthForm] = useState({ name: '', email: '', password: '' });
+  const [authForm, setAuthForm] = useState({ name: '', email: '', password: '', role: UserRole.ALUNO });
   const [isAuthLoading, setIsAuthLoading] = useState(false);
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [authStatus, setAuthStatus] = useState<'error' | 'success' | null>(null);
@@ -217,7 +256,7 @@ const App: React.FC = () => {
     if (isProcessing) {
       interval = window.setInterval(() => {
         setLoadingMessageIdx(prev => (prev + 1) % loadingMessages.length);
-      }, 2500);
+      }, 3000);
     }
     return () => { if (interval) clearInterval(interval); };
   }, [isProcessing]);
@@ -260,16 +299,18 @@ const App: React.FC = () => {
       const { data, error } = await supabase.auth.signUp({
         email: authForm.email,
         password: authForm.password,
-        options: { data: { full_name: authForm.name } }
+        options: { 
+          data: { 
+            full_name: authForm.name,
+            role: authForm.role
+          } 
+        }
       });
       if (error) {
         setAuthStatus('error');
         setAuthMessage(error.message);
       } else {
-        // Se o e-mail de confirmação estiver desativado no painel do Supabase, o usuário é logado automaticamente.
-        // Caso contrário, notificamos sucesso e sugerimos o login.
         if (data.session) {
-           // Usuário já entrou
         } else {
            setAuthStatus('success');
            setAuthMessage("Cadastro realizado com sucesso! Agora você já pode entrar.");
@@ -474,7 +515,14 @@ const App: React.FC = () => {
               <div className="bg-slate-900 p-6 rounded-2xl text-white">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">SQL para o Banco de Dados</p>
                 <div className="max-h-40 overflow-y-auto text-[10px] font-mono leading-relaxed opacity-80 custom-scrollbar">
-                  <pre>{`CREATE TABLE summaries (
+                  <pre>{`CREATE TABLE profiles (
+  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  full_name TEXT,
+  role TEXT DEFAULT 'Aluno' CHECK (role IN ('Professor', 'Aluno', 'Curioso')),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE summaries (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
@@ -485,6 +533,7 @@ const App: React.FC = () => {
   flashcards JSONB
 );
 
+ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE summaries ENABLE ROW LEVEL SECURITY;
 -- Adicione as políticas de RLS no painel do Supabase.`}</pre>
                 </div>
@@ -543,11 +592,29 @@ ALTER TABLE summaries ENABLE ROW LEVEL SECURITY;
 
             <AnimatePresence mode='wait'>
               {authMode === 'register' && (
-                <motion.div key="reg-name" initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 10 }} className="space-y-1.5">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">Nome Completo</label>
-                  <div className="relative group">
-                    <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-indigo-500" size={18} />
-                    <input type="text" value={authForm.name} onChange={(e) => setAuthForm({...authForm, name: e.target.value})} placeholder="Seu nome" className="w-full pl-12 pr-4 py-3.5 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-indigo-100 font-bold" />
+                <motion.div key="reg-fields" initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 10 }} className="space-y-5">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">Nome Completo</label>
+                    <div className="relative group">
+                      <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-indigo-500" size={18} />
+                      <input type="text" value={authForm.name} onChange={(e) => setAuthForm({...authForm, name: e.target.value})} placeholder="Seu nome" className="w-full pl-12 pr-4 py-3.5 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-indigo-100 font-bold" />
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">Eu sou...</label>
+                    <div className="relative group">
+                      <Briefcase className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-indigo-500" size={18} />
+                      <select 
+                        value={authForm.role} 
+                        onChange={(e) => setAuthForm({...authForm, role: e.target.value as UserRole})} 
+                        className="w-full pl-12 pr-10 py-3.5 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-indigo-100 font-bold appearance-none cursor-pointer"
+                      >
+                        {Object.values(UserRole).map(role => (
+                          <option key={role} value={role}>{role}</option>
+                        ))}
+                      </select>
+                      <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
+                    </div>
                   </div>
                 </motion.div>
               )}
@@ -639,7 +706,11 @@ ALTER TABLE summaries ENABLE ROW LEVEL SECURITY;
             </div>
             <div className="overflow-hidden flex-1">
               <p className="text-[11px] font-bold text-slate-800 truncate">{currentUser.user_metadata?.full_name || currentUser.email}</p>
-              <p className="text-[9px] text-slate-400 truncate">Sessão Ativa</p>
+              <div className="flex items-center gap-1">
+                <span className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded ${currentUser.user_metadata?.role === 'Professor' ? 'bg-indigo-100 text-indigo-700' : currentUser.user_metadata?.role === 'Curioso' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                  {currentUser.user_metadata?.role || 'Aluno'}
+                </span>
+              </div>
             </div>
           </div>
           <button onClick={handleLogout} className="w-full flex items-center gap-2 px-3 py-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all text-[10px] font-black uppercase tracking-widest">
@@ -817,9 +888,62 @@ ALTER TABLE summaries ENABLE ROW LEVEL SECURITY;
               
               <AnimatePresence>
                 {isProcessing && (
-                  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 z-[60] bg-white/95 backdrop-blur-md flex flex-col items-center justify-center p-12 text-center">
-                    <Loader2 className="animate-spin text-indigo-600 w-16 h-16 mb-8" />
-                    <h3 className="text-3xl font-black text-slate-800 mb-2">{loadingMessages[loadingMessageIdx]}</h3>
+                  <motion.div 
+                    initial={{ opacity: 0 }} 
+                    animate={{ opacity: 1 }} 
+                    exit={{ opacity: 0 }}
+                    className="absolute inset-0 z-[60] bg-white/95 backdrop-blur-xl flex flex-col items-center justify-center p-12 text-center"
+                  >
+                    <div className="relative mb-12">
+                      <motion.div 
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
+                        className="w-32 h-32 border-4 border-dashed border-indigo-200 rounded-full"
+                      />
+                      <motion.div 
+                        animate={{ scale: [1, 1.1, 1], opacity: [0.5, 1, 0.5] }}
+                        transition={{ duration: 2, repeat: Infinity }}
+                        className="absolute inset-0 flex items-center justify-center"
+                      >
+                        <div className="bg-gradient-to-br from-indigo-600 to-violet-700 p-5 rounded-3xl shadow-2xl shadow-indigo-200">
+                          <Cpu className="text-white w-10 h-10" />
+                        </div>
+                      </motion.div>
+                      <motion.div 
+                        animate={{ rotate: -360 }}
+                        transition={{ duration: 8, repeat: Infinity, ease: "linear" }}
+                        className="absolute -inset-4 border-2 border-indigo-50/50 rounded-full"
+                      />
+                    </div>
+                    
+                    <div className="relative h-12 flex flex-col items-center">
+                      <AnimatePresence mode="wait">
+                        <motion.h3 
+                          key={loadingMessageIdx}
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -10 }}
+                          className="text-2xl md:text-3xl font-black bg-gradient-to-r from-slate-900 to-indigo-600 bg-clip-text text-transparent mb-2"
+                        >
+                          {loadingMessages[loadingMessageIdx]}
+                        </motion.h3>
+                      </AnimatePresence>
+                    </div>
+
+                    <div className="mt-8 w-64 h-1.5 bg-slate-100 rounded-full overflow-hidden relative">
+                      <motion.div 
+                        animate={{ x: [-100, 300] }}
+                        transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
+                        className="absolute top-0 left-0 w-24 h-full bg-indigo-500 rounded-full shadow-[0_0_10px_rgba(99,102,241,0.5)]"
+                      />
+                    </div>
+                    
+                    <motion.div 
+                      initial={{ width: 0 }}
+                      animate={{ width: "80%" }}
+                      className="absolute top-0 left-0 h-1 bg-gradient-to-r from-indigo-500 via-violet-500 to-indigo-500 opacity-20"
+                      style={{ filter: "blur(2px)" }}
+                    />
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -874,7 +998,7 @@ ALTER TABLE summaries ENABLE ROW LEVEL SECURITY;
                         </label>
                         <div className={`flex flex-col p-4 border-2 border-dashed rounded-[2rem] gap-2 transition-all ${inputUrl ? 'border-indigo-500 bg-indigo-50' : 'border-slate-100 bg-slate-50'}`}>
                            <LinkIcon size={20} className={inputUrl ? 'text-indigo-600' : 'text-slate-300'} />
-                           <input type="url" placeholder="URL..." value={inputUrl} onChange={(e) => setInputUrl(e.target.value)} className="w-full px-3 py-2 bg-white border rounded-xl text-[10px] outline-none font-bold text-indigo-600 shadow-sm" />
+                           <input type="url" placeholder="URL..." value={inputTopic} onChange={(e) => setInputUrl(e.target.value)} className="w-full px-3 py-2 bg-white border rounded-xl text-[10px] outline-none font-bold text-indigo-600 shadow-sm" />
                         </div>
                         <input type="file" accept=".pdf,.doc,.docx" multiple onChange={handleFileUpload} className="hidden" id="doc-up" />
                         <label htmlFor="doc-up" className="flex flex-col items-center justify-center p-6 border-2 border-dashed rounded-[2rem] cursor-pointer bg-slate-50">
