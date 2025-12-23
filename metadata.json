@@ -1,0 +1,7 @@
+{
+  "name": "ResumAI - Arquiteto de Estudos",
+  "description": "Uma ferramenta avançada para estudantes que transforma fotos e documentos em resumos inteligentes e flashcards usando a tecnologia Gemini.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
