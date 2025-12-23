@@ -71,7 +71,10 @@ import {
   Users,
   Scale,
   Briefcase,
-  UserCircle
+  UserCircle,
+  Pause,
+  Play,
+  Square
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Summary, Subject, Importance, Flashcard, SummaryOption, User, UserRole } from './types';
@@ -171,6 +174,7 @@ const App: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterSubject, setFilterSubject] = useState<string>('Todos');
   const [activeSummary, setActiveSummary] = useState<Summary | null>(null);
@@ -334,9 +338,13 @@ const App: React.FC = () => {
 
   const handleLogout = async () => {
     if (!supabase) return;
-    if (confirm('Deseja sair da sua conta?')) {
+    try {
       await supabase.auth.signOut();
+      setCurrentUser(null);
       setActiveSummary(null);
+      setSummaries([]);
+    } catch (error) {
+      console.error("Erro ao sair:", error);
     }
   };
 
@@ -445,30 +453,59 @@ const App: React.FC = () => {
 
   const speak = async (text: string) => {
     if (isSpeaking) {
-      if (currentSourceRef.current) {
-        currentSourceRef.current.stop();
-        setIsSpeaking(false);
+      if (audioContextRef.current) {
+        if (isPaused) {
+          await audioContextRef.current.resume();
+          setIsPaused(false);
+        } else {
+          await audioContextRef.current.suspend();
+          setIsPaused(true);
+        }
       }
       return;
     }
 
     setIsSpeaking(true);
+    setIsPaused(false);
     try {
       const base64Audio = await gemini.generateSpeech(text);
       if (!audioContextRef.current) {
         audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
       }
       const ctx = audioContextRef.current;
+      if (ctx.state === 'suspended') {
+        await ctx.resume();
+      }
+      
       const audioBuffer = await decodeAudioData(decode(base64Audio), ctx, 24000, 1);
       const source = ctx.createBufferSource();
       source.buffer = audioBuffer;
       source.connect(ctx.destination);
-      source.onended = () => setIsSpeaking(false);
+      source.onended = () => {
+        setIsSpeaking(false);
+        setIsPaused(false);
+      };
       currentSourceRef.current = source;
       source.start();
     } catch (error) {
       console.error("Erro no TTS:", error);
       setIsSpeaking(false);
+      setIsPaused(false);
+    }
+  };
+
+  const stopAudio = () => {
+    if (currentSourceRef.current) {
+      try {
+        currentSourceRef.current.stop();
+      } catch (e) {}
+      setIsSpeaking(false);
+      setIsPaused(false);
+    }
+    if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+        audioContextRef.current.resume().then(() => {
+             setIsPaused(false);
+        });
     }
   };
 
@@ -647,7 +684,7 @@ ALTER TABLE summaries ENABLE ROW LEVEL SECURITY;
 
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-[#F8FAFC]">
-      <aside className="w-full md:w-60 bg-white border-r border-slate-200 flex flex-col h-screen sticky top-0 overflow-hidden z-10 shadow-sm transition-all duration-300">
+      <aside className="w-full md:w-60 bg-white border-b md:border-r border-slate-200 flex flex-col h-auto md:h-screen sticky top-0 overflow-hidden z-10 shadow-sm transition-all duration-300">
         <div className="p-5 flex items-center gap-2">
           <div className="bg-gradient-to-br from-indigo-600 to-violet-700 p-2 rounded-xl shadow-lg shadow-indigo-100">
             <BrainCircuit className="text-white w-5 h-5" />
@@ -658,7 +695,7 @@ ALTER TABLE summaries ENABLE ROW LEVEL SECURITY;
           </div>
         </div>
 
-        <div className="flex-1 px-3 overflow-y-auto custom-scrollbar">
+        <div className="flex-1 px-3 overflow-y-auto custom-scrollbar hidden md:block">
           <button 
             onClick={() => { resetForm(); setIsModalOpen(true); }}
             className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-xl transition-all shadow-md mb-6 mt-2"
@@ -697,6 +734,29 @@ ALTER TABLE summaries ENABLE ROW LEVEL SECURITY;
               </div>
             </div>
           </div>
+        </div>
+        
+        <div className="md:hidden p-4 border-t border-slate-100 flex gap-2">
+           <button 
+            onClick={() => { resetForm(); setIsModalOpen(true); }}
+            className="flex-1 flex items-center justify-center gap-2 bg-indigo-600 text-white font-bold py-2 rounded-xl text-[10px] uppercase"
+          >
+            <Zap size={14} /> Novo
+          </button>
+           <div className="relative flex-1">
+                <select
+                  value={filterSubject}
+                  onChange={(e) => { setFilterSubject(e.target.value); setActiveSummary(null); }}
+                  className="w-full h-full bg-slate-50 border border-slate-100 text-slate-700 text-[10px] font-bold rounded-xl py-2 pl-3 pr-8 outline-none appearance-none"
+                >
+                  {['Todos', ...Object.values(Subject)].map(subj => (
+                    <option key={subj} value={subj}>{subj}</option>
+                  ))}
+                </select>
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                  <ChevronDown size={12} />
+                </div>
+              </div>
         </div>
 
         <div className="p-4 border-t border-slate-100 space-y-3">
@@ -754,7 +814,7 @@ ALTER TABLE summaries ENABLE ROW LEVEL SECURITY;
                      </div>
                    </div>
                 </div>
-                <div className="relative w-72 group">
+                <div className="relative w-full md:w-72 group">
                   <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-indigo-500" size={16} />
                   <input type="text" placeholder="Pesquisar..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-white border border-slate-200 rounded-2xl focus:ring-4 focus:ring-indigo-100 outline-none transition-all shadow-sm text-xs font-bold" />
                 </div>
@@ -843,9 +903,23 @@ ALTER TABLE summaries ENABLE ROW LEVEL SECURITY;
                 </div>
                 
                 <div className="flex flex-row md:flex-col gap-3 w-full md:w-auto">
-                  <button onClick={() => speak(activeSummary.content)} disabled={isSpeaking} className={`flex-1 md:w-48 flex items-center justify-center gap-3 ${isSpeaking ? 'bg-rose-500' : 'bg-slate-900'} text-white px-6 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl`}>
-                    {isSpeaking ? <Loader2 className="animate-spin" size={16} /> : <Volume2 size={16} />} Ouvir Áudio
-                  </button>
+                  <div className="flex flex-1 md:w-48 gap-2">
+                    <button 
+                      onClick={() => speak(activeSummary.content)} 
+                      className={`flex-1 flex items-center justify-center gap-3 ${isSpeaking ? (isPaused ? 'bg-emerald-600' : 'bg-amber-500') : 'bg-slate-900'} text-white px-6 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl transition-all`}
+                    >
+                      {isSpeaking ? (isPaused ? <Play size={16} /> : <Pause size={16} />) : <Volume2 size={16} />} 
+                      {isSpeaking ? (isPaused ? 'Retomar' : 'Pausar') : 'Ouvir Áudio'}
+                    </button>
+                    {isSpeaking && (
+                        <button 
+                            onClick={stopAudio}
+                            className="bg-rose-600 text-white p-4 rounded-2xl shadow-xl hover:bg-rose-700 transition-all"
+                        >
+                            <Square size={16} className="fill-white" />
+                        </button>
+                    )}
+                  </div>
                   <button onClick={() => setIsExportMenuOpen(!isExportMenuOpen)} className="flex-1 md:w-48 flex items-center justify-between gap-3 bg-indigo-600 text-white px-6 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl">
                     <Download size={16} /> Baixar <ChevronDown size={14} />
                   </button>
@@ -998,7 +1072,7 @@ ALTER TABLE summaries ENABLE ROW LEVEL SECURITY;
                         </label>
                         <div className={`flex flex-col p-4 border-2 border-dashed rounded-[2rem] gap-2 transition-all ${inputUrl ? 'border-indigo-500 bg-indigo-50' : 'border-slate-100 bg-slate-50'}`}>
                            <LinkIcon size={20} className={inputUrl ? 'text-indigo-600' : 'text-slate-300'} />
-                           <input type="url" placeholder="URL..." value={inputTopic} onChange={(e) => setInputUrl(e.target.value)} className="w-full px-3 py-2 bg-white border rounded-xl text-[10px] outline-none font-bold text-indigo-600 shadow-sm" />
+                           <input type="url" placeholder="URL..." value={inputUrl} onChange={(e) => setInputUrl(e.target.value)} className="w-full px-3 py-2 bg-white border rounded-xl text-[10px] outline-none font-bold text-indigo-600 shadow-sm" />
                         </div>
                         <input type="file" accept=".pdf,.doc,.docx" multiple onChange={handleFileUpload} className="hidden" id="doc-up" />
                         <label htmlFor="doc-up" className="flex flex-col items-center justify-center p-6 border-2 border-dashed rounded-[2rem] cursor-pointer bg-slate-50">
